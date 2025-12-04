@@ -1,106 +1,138 @@
+import json
 import os
 
-import pandas as pd
+import pydeck as pdk
 import streamlit as st
-from databricks import sql
-from databricks.sdk.core import Config
 
-# Configure Streamlit page
-st.set_page_config(page_title="Weather App", layout="wide")
-st.title("Weather / Rainfall Explorer")
 
-st.markdown(
-    """
-This app runs inside Databricks Apps and connects to a Unity Catalog table
-through a SQL warehouse.
+st.set_page_config(page_title="Weather App – GeoJSON Map", layout="wide")
+st.title("Weather App – GeoJSON from Unity Catalog Volume")
 
-Use it to explore weather / rainfall data.
-"""
-)
 
-# ---- Change these to your real objects ----
-DEFAULT_TABLE = "catalog.schema.weather_table"  # e.g. analytics.weather.daily
-WAREHOUSE_HTTP_PATH = os.environ.get("DATABRICKS_WAREHOUSE_HTTP_PATH", "")
+# --- Environment configuration ---
 
-cfg = Config()  # works both locally (via profile) and in Databricks Apps
+VOLUME_ROOT = os.environ.get("VOLUME_PATH")  # from app.yaml valueFrom: volume
+DEFAULT_REL_PATH = os.environ.get("GEOJSON_REL_PATH", "my_layer.geojson")
 
-if not WAREHOUSE_HTTP_PATH:
-    st.warning(
-        "Environment variable `DATABRICKS_WAREHOUSE_HTTP_PATH` is not set.\n\n"
-        "Set this in the Databricks App settings after deployment."
+if not VOLUME_ROOT:
+    st.error(
+        "VOLUME_PATH is not set.\n\n"
+        "Make sure:\n"
+        "1. The app has a UC volume resource (inv_weather_dev.forecasts.tropical_bi) "
+        "   with resource key `volume` in the Configure → App resources UI.\n"
+        "2. app.yaml defines env:\n"
+        "   - name: VOLUME_PATH\n"
+        "     valueFrom: volume"
     )
-
-table_name = st.text_input("Unity Catalog table", value=DEFAULT_TABLE)
-row_limit = st.slider("Row limit", min_value=100, max_value=20_000, value=1_000, step=100)
-
-
-# ---- Databricks helpers ----
-@st.cache_resource
-def get_connection(http_path: str):
-    if not http_path:
-        raise RuntimeError("HTTP path for SQL warehouse is empty.")
-    return sql.connect(
-        server_hostname=cfg.host,
-        http_path=http_path,
-        credentials_provider=lambda: cfg.authenticate,
-    )
+    st.stop()
 
 
 @st.cache_data(show_spinner=True)
-def load_table(table: str, limit: int) -> pd.DataFrame:
-    conn = get_connection(WAREHOUSE_HTTP_PATH)
-    with conn.cursor() as cursor:
-        query = f"SELECT * FROM {table} LIMIT {limit}"
-        cursor.execute(query)
-        return cursor.fetchall_arrow().to_pandas()
+def list_geojson_files(root: str):
+    """Return relative paths of all .geojson files under the volume."""
+    matches = []
+    for dirpath, _, filenames in os.walk(root):
+        for name in filenames:
+            if name.lower().endswith(".geojson"):
+                full = os.path.join(dirpath, name)
+                rel = os.path.relpath(full, root)
+                matches.append(rel)
+    return sorted(matches)
 
 
-# ---- UI logic ----
-if WAREHOUSE_HTTP_PATH and table_name:
-    try:
-        df = load_table(table_name, row_limit)
+@st.cache_data(show_spinner=True)
+def load_geojson(path: str):
+    with open(path, "r") as f:
+        return json.load(f)
 
-        st.subheader("Data preview")
-        st.dataframe(df)
 
-        # Basic weather-specific helpers
-        date_cols = [c for c in df.columns if "date" in c.lower()]
-        numeric_cols = df.select_dtypes(include="number").columns.tolist()
+def compute_view_state(geojson: dict) -> pdk.ViewState:
+    """Compute a simple center for the geometry."""
+    lats, lons = [], []
 
-        # Pick a date column, if present
-        if date_cols:
-            date_col = st.selectbox("Date column", options=date_cols)
-            df[date_col] = pd.to_datetime(df[date_col])
+    def walk_coords(coords):
+        if isinstance(coords[0], (float, int)):
+            lon, lat = coords[:2]
+            lons.append(lon)
+            lats.append(lat)
+        else:
+            for c in coords:
+                walk_coords(c)
 
-            with st.expander("Filter by date range", expanded=False):
-                min_date = df[date_col].min()
-                max_date = df[date_col].max()
-                start, end = st.date_input(
-                    "Date range",
-                    value=(min_date.date(), max_date.date()),
-                    min_value=min_date.date(),
-                    max_value=max_date.date(),
-                )
-                mask = (df[date_col] >= pd.to_datetime(start)) & (
-                    df[date_col] <= pd.to_datetime(end)
-                )
-                df = df[mask]
+    for feature in geojson.get("features", []):
+        geom = feature.get("geometry") or {}
+        if "coordinates" in geom:
+            walk_coords(geom["coordinates"])
 
-        st.subheader("Summary stats")
-        st.write(df.describe(include="all"))
+    if not lats:
+        return pdk.ViewState(latitude=0, longitude=0, zoom=1)
 
-        if numeric_cols:
-            metric_col = st.selectbox(
-                "Numeric column to chart (e.g. rainfall amount)",
-                options=numeric_cols,
-            )
-            st.subheader(f"Time series of `{metric_col}`")
-            if date_cols:
-                st.line_chart(df.set_index(date_cols[0])[metric_col])
-            else:
-                st.line_chart(df[metric_col])
+    return pdk.ViewState(
+        latitude=sum(lats) / len(lats),
+        longitude=sum(lons) / len(lons),
+        zoom=6,
+    )
 
-    except Exception as e:
-        st.error(f"Error querying table: {e}")
-else:
+
+st.markdown(
+    f"**Volume root:** `{VOLUME_ROOT}`  \n"
+    "This app reads GeoJSON files from that Unity Catalog volume and plots them."
+)
+
+# --- Choose a GeoJSON file inside the volume ---
+
+with st.expander("Choose GeoJSON file", expanded=True):
+    files = list_geojson_files(VOLUME_ROOT)
+
+    if files:
+        rel_path = st.selectbox(
+            "GeoJSON file in the volume",
+            options=files,
+            index=files.index(DEFAULT_REL_PATH) if DEFAULT_REL_PATH in files else 0,
+        )
+    else:
+        st.warning(
+            "No `.geojson` files found in the volume. "
+            "Upload one to the volume and redeploy/refresh."
+        )
+        rel_path = st.text_input("Relative path to GeoJSON file", value=DEFAULT_REL_PATH)
+
+GEOJSON_PATH = os.path.join(VOLUME_ROOT, rel_path)
+
+st.caption(f"Full path: `{GEOJSON_PATH}`")
+
+# --- Load and display the GeoJSON ---
+
+try:
+    geojson = load_geojson(GEOJSON_PATH)
+except FileNotFoundError:
+    st.error(f"GeoJSON file not found at {GEOJSON_PATH}")
     st.stop()
+except Exception as e:
+    st.error(f"Error loading GeoJSON: {e}")
+    st.stop()
+
+st.subheader("Interactive map")
+
+view_state = compute_view_state(geojson)
+
+layer = pdk.Layer(
+    "GeoJsonLayer",
+    data=geojson,
+    pickable=True,
+    stroked=True,
+    filled=True,
+    auto_highlight=True,
+)
+
+deck = pdk.Deck(
+    layers=[layer],
+    initial_view_state=view_state,
+    tooltip={"text": "{name}"},  # change 'name' to whatever property you have
+)
+
+st.pydeck_chart(deck)
+
+st.subheader("Raw GeoJSON (preview)")
+st.json(geojson, expanded=False)
+

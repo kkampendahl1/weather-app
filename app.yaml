@@ -6,3 +6,15 @@ command:
   - "8000"
   - --server.address
   - "0.0.0.0"
+
+env:
+  # This env var will be set to /Volumes/inv_weather_dev/forecasts/tropical_bi
+  - name: VOLUME_PATH
+    valueFrom: volume   # matches the Resource key in the UI
+
+  # Optional default file inside the volume – you can change this later
+  - name: GEOJSON_REL_PATH
+    value: "my_layer.geojson"
+
+  - name: STREAMLIT_GATHER_USAGE_STATS
+    value: "false"
