@@ -8,9 +8,17 @@ command:
   - "0.0.0.0"
 
 env:
-  # Full path to your specific GeoJSON file
-  - name: GEOJSON_PATH
-    value: "/Volumes/inv_weather_dev/forecasts/tropical_bi/tracks/model_tracks (1) (1).geojson"
+  # SPC default (already working)
+  - name: SPC_GEOJSON_URL
+    value: "https://www.spc.noaa.gov/products/outlook/day1otlk_cat.nolyr.geojson"
+
+  # Root directory for your NC4 GeoJSON volume
+  - name: NC4_ROOT
+    value: "/Volumes/inv_weather_dev/nc4/geojson"
+
+  # Optional: default file inside that root
+  - name: NC4_DEFAULT_FILE
+    value: "day1otlk_20250818_0100_cat.lyr.geojson"
 
   - name: STREAMLIT_GATHER_USAGE_STATS
     value: "false"
