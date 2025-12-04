@@ -1,6 +1,6 @@
 import json
 import os
-
+import requests
 import pydeck as pdk
 import streamlit as st
 
@@ -39,6 +39,15 @@ if not os.path.exists(GEOJSON_PATH):
 def load_geojson(path: str):
     with open(path, "r") as f:
         return json.load(f)
+
+
+TEST_URL = "https://raw.githubusercontent.com/vega/vega/master/docs/data/us-10m.json"  # topojson/geojson-ish
+
+@st.cache_data(show_spinner=True)
+def load_geojson_from_url(url: str):
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
 
 
 geojson = load_geojson(GEOJSON_PATH)
