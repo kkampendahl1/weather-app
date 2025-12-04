@@ -12,14 +12,16 @@ st.title("Weather App – GeoJSON from Unity Catalog Volume")
 # --- Environment configuration ---
 
 VOLUME_ROOT = os.environ.get("VOLUME_PATH")  # from app.yaml valueFrom: volume
-DEFAULT_REL_PATH = os.environ.get("GEOJSON_REL_PATH", "my_layer.geojson")
+DEFAULT_REL_PATH = os.environ.get(
+    "GEOJSON_REL_PATH", "tracks/model_tracks (1) (1).geojson"
+)
 
 if not VOLUME_ROOT:
     st.error(
         "VOLUME_PATH is not set.\n\n"
         "Make sure:\n"
         "1. The app has a UC volume resource (inv_weather_dev.forecasts.tropical_bi) "
-        "   with resource key `volume` in the Configure → App resources UI.\n"
+        "   with resource key `volume` in Configure → App resources.\n"
         "2. app.yaml defines env:\n"
         "   - name: VOLUME_PATH\n"
         "     valueFrom: volume"
@@ -79,23 +81,27 @@ st.markdown(
     "This app reads GeoJSON files from that Unity Catalog volume and plots them."
 )
 
-# --- Choose a GeoJSON file inside the volume ---
+# --- Choose GeoJSON file inside the volume ---
 
 with st.expander("Choose GeoJSON file", expanded=True):
     files = list_geojson_files(VOLUME_ROOT)
 
     if files:
+        # Default to the env-specified file if present
+        default_index = files.index(DEFAULT_REL_PATH) if DEFAULT_REL_PATH in files else 0
         rel_path = st.selectbox(
             "GeoJSON file in the volume",
             options=files,
-            index=files.index(DEFAULT_REL_PATH) if DEFAULT_REL_PATH in files else 0,
+            index=default_index,
         )
     else:
         st.warning(
             "No `.geojson` files found in the volume. "
             "Upload one to the volume and redeploy/refresh."
         )
-        rel_path = st.text_input("Relative path to GeoJSON file", value=DEFAULT_REL_PATH)
+        rel_path = st.text_input(
+            "Relative path to GeoJSON file", value=DEFAULT_REL_PATH
+        )
 
 GEOJSON_PATH = os.path.join(VOLUME_ROOT, rel_path)
 
@@ -128,11 +134,12 @@ layer = pdk.Layer(
 deck = pdk.Deck(
     layers=[layer],
     initial_view_state=view_state,
-    tooltip={"text": "{name}"},  # change 'name' to whatever property you have
+    tooltip={"text": "{name}"},  # change 'name' to a property in your GeoJSON
 )
 
 st.pydeck_chart(deck)
 
 st.subheader("Raw GeoJSON (preview)")
 st.json(geojson, expanded=False)
+
 
