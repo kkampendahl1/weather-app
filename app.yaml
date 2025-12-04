@@ -8,13 +8,9 @@ command:
   - "0.0.0.0"
 
 env:
-  # Will resolve to /Volumes/inv_weather_dev/forecasts/tropical_bi
-  - name: VOLUME_PATH
-    valueFrom: volume
-
-  # Exact path *inside* that volume to your file:
-  - name: GEOJSON_REL_PATH
-    value: "tracks/model_tracks (1) (1).geojson"
+  # Full path to your specific GeoJSON file
+  - name: GEOJSON_PATH
+    value: "/Volumes/inv_weather_dev/forecasts/tropical_bi/tracks/model_tracks (1) (1).geojson"
 
   - name: STREAMLIT_GATHER_USAGE_STATS
     value: "false"
